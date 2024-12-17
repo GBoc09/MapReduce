@@ -31,8 +31,8 @@ type ClientMessage struct {
 	Message string
 }
 type ClientResponse struct {
-	FinalData []int32
-	Ack       string
+	Data []int32
+	Ack  string
 }
 type DatasetOutput struct {
 	Ack       string

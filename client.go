@@ -18,7 +18,7 @@ func main() {
 		num := int32(r.Intn(100) + 1)
 		dataset = append(dataset, num)
 	}
-	log.Printf("Dataset generato %v", dataset)
+	log.Printf("Dataset generato: %v", dataset)
 	addr := "localhost:" + "9999"        // ascolto server
 	client, err := rpc.Dial("tcp", addr) // client
 	defer client.Close()

@@ -184,7 +184,7 @@ func reducerWorkers(workerRanges map[int][]int32) {
 			if err != nil {
 				log.Printf("Errore nella chiamata RPC %d: %v", workerID, err)
 			}
-			fmt.Printf("Worker %d ha completato la riduzione %v\n", wokerID, reduceReply.Ack)
+			fmt.Printf("Worker  %d ha completato la riduzione %v\n", wokerID, reduceReply.Ack)
 		}(wokerID)
 	}
 	wait.Wait()

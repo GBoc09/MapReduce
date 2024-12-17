@@ -101,7 +101,7 @@ func (w *Worker) Execute(arg *utils.WorkerArgs, reply *utils.WorkerReply) error 
 	w.WorkerID = arg.WorkerID
 	w.WorkerRanges = arg.WorkerRanges
 	w.WorkerToDo = arg.ToDo
-	fmt.Printf("Job da eseguire:", arg.ToDo)
+	fmt.Printf("Job da eseguire: ", arg.ToDo)
 	w.Intermediate = createKeyVal(arg.ToDo)
 	workerArgs := utils.WorkerArgs{}
 	workerArgs.Job = w.Intermediate
