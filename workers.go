@@ -30,71 +30,70 @@ func createKeyVal(data []int32) map[int32]int32 {
 }
 
 func (w *Worker) DistributedAndSortJob(arg *utils.ReduceArgs, reply *utils.ReduceReply) error {
-	fmt.Printf("Worker %d processamento dati:\n", w.WorkerID)
-	var wait sync.WaitGroup
+	fmt.Printf("Worker %d: inizio riduzione dati.\n", w.WorkerID)
 
-	for diffID, diffRange := range w.WorkerRanges {
-		if diffID == w.WorkerID {
-			continue
+	// Mappa temporanea per accumulare dati da inviare ad altri workers
+	dataToSend := make(map[int]map[int32]int32)
+
+	w.mutex.Lock()
+	for key, val := range w.Intermediate {
+		for diffID, diffRange := range w.WorkerRanges {
+			if diffID != w.WorkerID && isInRange(key, diffRange) {
+				if _, exists := dataToSend[diffID]; !exists {
+					dataToSend[diffID] = make(map[int32]int32)
+				}
+				dataToSend[diffID][key] = val
+				delete(w.Intermediate, key)
+				break
+			}
 		}
+	}
+	w.mutex.Unlock()
 
-		wait.Add(1)
-		go func(diffID int, diffRange []int32) {
-			defer wait.Done()
-			diffWorkerAdd := fmt.Sprintf("localhost:%d", 8000+diffID)
-			client, err := rpc.Dial("tcp", diffWorkerAdd)
+	// Invio dei dati accumulati ai workers destinatari
+	var wg sync.WaitGroup
+	for diffID, data := range dataToSend {
+		wg.Add(1)
+		go func(diffID int, data map[int32]int32) {
+			defer wg.Done()
+			diffWorkerAddr := fmt.Sprintf("localhost:%d", 8000+diffID)
+			client, err := rpc.Dial("tcp", diffWorkerAddr)
 			if err != nil {
-				log.Printf("Errore nella connessione con %d: %v", diffID, err)
+				log.Printf("Errore connessione worker %d: %v", diffID, err)
 				return
 			}
 			defer client.Close()
 
-			temp := make(map[int32]int32)
-			w.mutex.Lock()
-			for key, val := range w.Intermediate {
-				if isInRange(key, w.WorkerRanges[w.WorkerID]) && isInRange(key, diffRange) {
-					temp[key] += val
-					delete(w.Intermediate, key)
-				}
+			args := utils.WorkerArgs{
+				Job:      data,
+				WorkerID: w.WorkerID,
 			}
-			w.mutex.Unlock()
-			if len(temp) > 0 {
-				sendArg := utils.WorkerArgs{
-					Job:          temp,
-					WorkerID:     w.WorkerID,
-					WorkerRanges: w.WorkerRanges,
-				}
-				var reply utils.ReduceReply
-				err = client.Call("Worker.ReceiveData", &sendArg, &reply)
-				if err != nil {
-					log.Printf("Errore chiamata rpc %d: %v", diffID, err)
-					return
-				}
+			var response utils.ReduceReply
+			if err := client.Call("Worker.ReceiveData", &args, &response); err != nil {
+				log.Printf("Errore chiamata RPC al worker %d: %v", diffID, err)
 			}
-		}(diffID, diffRange)
+		}(diffID, data)
 	}
-	wait.Wait()
-	fmt.Printf("Worker %d processamento dati %v:\n", w.WorkerID, w.Intermediate)
-	reply.Ack = "Riduzione completata"
+	wg.Wait()
 
-	masterAdd := fmt.Sprintf("localhost:9999")
-	client, err := rpc.Dial("tcp", masterAdd)
+	// Invio finale al master
+	masterAddr := "localhost:9999"
+	client, err := rpc.Dial("tcp", masterAddr)
 	if err != nil {
-		log.Printf("Errore nella connessione con master %v", err)
+		log.Printf("Errore connessione con il master: %v", err)
 		return err
 	}
 	defer client.Close()
-	workers := utils.WorkerArgs{
+
+	args := utils.WorkerArgs{
 		Job:      w.Intermediate,
 		WorkerID: w.WorkerID,
 	}
-	var workerReply utils.WorkerReply
-	err = client.Call("Master.ReceiveDataFromWorker", &workers, &workerReply)
-	if err != nil {
-		log.Printf("Errore nella connessione con master %v", err)
+	if err := client.Call("Master.ReceiveDataFromWorker", &args, reply); err != nil {
+		log.Printf("Errore chiamata RPC al master: %v", err)
 		return err
 	}
-	fmt.Printf("Dati inviati al master")
+	reply.Ack = "Riduzione completata e dati inviati al master"
 	return nil
 }
 
@@ -123,14 +122,11 @@ func (w *Worker) ReceiveData(arg *utils.WorkerArgs, reply *utils.WorkerReply) er
 	reply.Ack = "Dati ricevuti"
 	return nil
 }
-
 func isInRange(key int32, ranges []int32) bool {
-	for _, val := range ranges {
-		if val == key {
-			return true
-		}
+	if len(ranges) == 0 {
+		return false // non ci sono intervalli da controllare
 	}
-	return false
+	return key >= ranges[0] && key <= ranges[len(ranges)-1] // ranges[0] = min val; ranges[len(ranges)-1] = max val
 }
 
 func main() {
