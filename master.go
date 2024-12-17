@@ -111,7 +111,7 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 		go func(workerID int, data []int32) {
 			defer wg.Done()
 
-			workerAddr := fmt.Sprintf("localhost:%d", 5000+workerID)
+			workerAddr := fmt.Sprintf("localhost:%d", 8000+workerID)
 			workerConn, err := rpc.Dial("tcp", workerAddr)
 			if err != nil {
 				log.Printf("Errore nella connessione al worker %d: %v", workerID, err)
@@ -175,7 +175,7 @@ func reducePhase(workerRanges map[int][]int32) {
 		wait.Add(1)
 		go func(workerID int) {
 			defer wait.Done()
-			workerAddr := fmt.Sprintf("localhost:%d", 5000+workerID)
+			workerAddr := fmt.Sprintf("localhost:%d", 8000+workerID)
 			client, err := rpc.Dial("tcp", workerAddr)
 			if err != nil {
 				log.Printf("Errore nella connessione al worker %d: %v", workerID, err)
@@ -185,7 +185,7 @@ func reducePhase(workerRanges map[int][]int32) {
 
 			reduceArgs := utils.WorkerArgs{}
 			reduceReply := utils.WorkerReply{}
-			err = client.Call("Worker.ProcessJob", &reduceArgs, &reduceReply)
+			err = client.Call("Worker.DistributedAndSortJob", &reduceArgs, &reduceReply)
 			if err != nil {
 				log.Printf("Errore nella chiamata RPC %d: %v", workerID, err)
 			}

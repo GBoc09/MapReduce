@@ -16,7 +16,7 @@ func main() {
 	var dataset []int32
 	source := rand.NewSource(time.Now().UnixNano())
 	r := rand.New(source)
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 100; i++ {
 		num := int32(r.Intn(100) + 1)
 		dataset = append(dataset, num)
 	}
