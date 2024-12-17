@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-type Client struct{}
-
 /** il client deve scrivere a schermo lo schema finale dei valori in ordine crescente */
 
 func main() {

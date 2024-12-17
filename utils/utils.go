@@ -1,12 +1,10 @@
 package utils
 
-import (
-	"log"
-)
+import "log"
 
 type WorkerArgs struct {
 	Job          map[int32]int32
-	JobToDo      []int32
+	ToDo         []int32
 	WorkerID     int
 	WorkerRanges map[int][]int32
 }
@@ -29,7 +27,7 @@ type WorkerData struct {
 type DatasetInput struct {
 	Data []int32
 }
-type ClientRequest struct {
+type ClientMessage struct {
 	Message string
 }
 type ClientResponse struct {

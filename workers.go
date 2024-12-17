@@ -97,12 +97,12 @@ func (w *Worker) DistributedAndSortJob(arg *utils.ReduceArgs, reply *utils.Reduc
 	return nil
 }
 
-func (w *Worker) ProcessJob(arg *utils.WorkerArgs, reply *utils.WorkerReply) error {
+func (w *Worker) Execute(arg *utils.WorkerArgs, reply *utils.WorkerReply) error {
 	w.WorkerID = arg.WorkerID
 	w.WorkerRanges = arg.WorkerRanges
-	w.WorkerToDo = arg.JobToDo
-	fmt.Printf("Job da eseguire:", arg.JobToDo)
-	w.Intermediate = createKeyVal(arg.JobToDo)
+	w.WorkerToDo = arg.ToDo
+	fmt.Printf("Job da eseguire:", arg.ToDo)
+	w.Intermediate = createKeyVal(arg.ToDo)
 	workerArgs := utils.WorkerArgs{}
 	workerArgs.Job = w.Intermediate
 

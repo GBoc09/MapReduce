@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Master struct {
@@ -33,12 +34,6 @@ func (m *Master) ReceiveDataFromWorker(arg *utils.WorkerArgs, reply *utils.Worke
 
 }
 
-func sortData(data []utils.WorkerData) {
-	sort.Slice(data, func(i, j int) bool {
-		return data[i].WorkerID < data[j].WorkerID
-	})
-}
-
 func translateDataToArray(data []utils.WorkerData) []int32 {
 	var result []int32
 	for _, worker := range data {
@@ -54,7 +49,7 @@ func translateDataToArray(data []utils.WorkerData) []int32 {
 	return result
 }
 
-func calculateRanges(totItem, totWorkers int) map[int][]int32 {
+func rangeWorker(totItem, totWorkers int) map[int][]int32 {
 	workersRanges := make(map[int][]int32)
 	rangeSize := totItem / totWorkers
 	remaining := totItem % totWorkers
@@ -78,7 +73,7 @@ func calculateRanges(totItem, totWorkers int) map[int][]int32 {
 	return workersRanges
 }
 
-func findMax(array []int32) int32 {
+func maxValue(array []int32) int32 {
 	max := array[0]
 	for _, value := range array {
 		if value > max {
@@ -93,8 +88,8 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 	log.Printf("Ricevuto dataset: %v", request.Data)
 
 	numWorkers := 5
-	maxData := findMax(request.Data)
-	workerRanges := calculateRanges(int(maxData), numWorkers)
+	maxData := maxValue(request.Data)
+	workerRanges := rangeWorker(int(maxData), numWorkers)
 	fmt.Println("Il range dei worker sono:", workerRanges)
 
 	var workerData = make(map[int][]int32)
@@ -120,12 +115,12 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 			defer workerConn.Close()
 
 			workerArgs := utils.WorkerArgs{
-				JobToDo:      data,
+				ToDo:         data,
 				WorkerID:     workerID,
 				WorkerRanges: workerRanges,
 			}
 			var workerReply utils.WorkerReply
-			err = workerConn.Call("Worker.ProcessJob", &workerArgs, &workerReply)
+			err = workerConn.Call("Worker.Execute", &workerArgs, &workerReply)
 			if err != nil {
 				log.Printf("Errore nella connessione al worker %d: %v", workerID, err)
 				return
@@ -143,7 +138,7 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 
 	wg.Wait()
 
-	reducePhase(workerRanges)
+	reducerWorkers(workerRanges)
 
 	finalArray := translateDataToArray(m.CollectedData)
 	fmt.Printf("Risultato finale inviato al client %v", finalArray)
@@ -169,7 +164,7 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 	return nil
 }
 
-func reducePhase(workerRanges map[int][]int32) {
+func reducerWorkers(workerRanges map[int][]int32) {
 	var wait sync.WaitGroup
 	for wokerID := range workerRanges {
 		wait.Add(1)
@@ -195,24 +190,51 @@ func reducePhase(workerRanges map[int][]int32) {
 	wait.Wait()
 }
 
+func waitForCompletion(master *Master) {
+	for {
+		master.mutex.Lock()
+		if len(master.CollectedData) > 0 {
+			master.mutex.Unlock()
+			break
+		}
+		master.mutex.Unlock()
+		time.Sleep(1 * time.Second)
+	}
+	log.Println("Tutti i job sono stati completati")
+}
+
 func main() {
 	master := new(Master)
 	server := rpc.NewServer()
 	err := server.Register(master)
 	utils.CheckError(err)
 
+	stopChan := make(chan struct{})
+
 	add := "localhost:9999"
 	listener, err := net.Listen("tcp", add)
 	utils.CheckError(err)
 	defer listener.Close()
 
-	log.Printf("MasterReceiveData in ascolto sulla porta 9999")
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Printf("Errore nella connessione %v", err)
-			continue
+	go func() {
+
+		log.Printf("MasterReceiveData in ascolto sulla porta 9999")
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				select {
+				case <-stopChan:
+					return
+				default:
+					log.Printf("Errore nella connessione %v", err)
+					continue
+				}
+
+			}
+			go server.ServeConn(conn)
 		}
-		go server.ServeConn(conn)
-	}
+	}()
+	waitForCompletion(master)
+	close(stopChan)
+	log.Printf("Server chiuso\n")
 }
