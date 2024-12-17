@@ -2,111 +2,217 @@ package main
 
 import (
 	"GoLandFiles/utils"
+	"fmt"
 	"log"
 	"net"
 	"net/rpc"
+	"os"
+	"sort"
+	"strings"
 	"sync"
 )
 
-// Definiamo la struttura per le richieste dei chunk da parte dei mapper
-type DatasetRequest struct {
-	Dataset []string
-}
-
-// definiamo una struttura per i messaggi di ricezione da parte dei mapper
-type Response struct {
-	Message string
-}
-
-// definiamo la struttura in cui definiamo gli addresses dei mapper
-type RegisterMapperRequest struct {
-	Address string
-}
-
 type Master struct {
-	mappers []string
-	mutex   sync.Mutex
+	CollectedData []utils.WorkerData
+	mutex         sync.Mutex
+	results       map[int32]int32
+}
+
+func (m *Master) ReceiveDataFromWorker(arg *utils.WorkerArgs, reply *utils.WorkerReply) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	workerData := utils.WorkerData{
+		WorkerID: arg.WorkerID,
+		Data:     arg.Job,
+	}
+	m.CollectedData = append(m.CollectedData, workerData)
+	reply.Ack = "Dati ricevuti dai workers"
+	fmt.Println("I dati sono:", m.CollectedData)
+	return nil
+
+}
+
+func sortData(data []utils.WorkerData) {
+	sort.Slice(data, func(i, j int) bool {
+		return data[i].WorkerID < data[j].WorkerID
+	})
+}
+
+func translateDataToArray(data []utils.WorkerData) []int32 {
+	var result []int32
+	for _, worker := range data {
+		for key, value := range worker.Data {
+			for i := 0; i < int(value); i++ {
+				result = append(result, key)
+			}
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i] < result[j]
+	})
+	return result
+}
+
+func calculateRanges(totItem, totWorkers int) map[int][]int32 {
+	workersRanges := make(map[int][]int32)
+	rangeSize := totItem / totWorkers
+	remaining := totItem % totWorkers
+
+	startNumRange := 1
+	for i := 1; i <= totWorkers; i++ {
+		end := startNumRange + rangeSize - 1
+		if i <= remaining {
+			end++
+		}
+		if i == totWorkers {
+			end = totItem
+		}
+		rangeList := make([]int32, end-startNumRange+1)
+		for j := startNumRange; j <= end; j++ {
+			rangeList = append(rangeList, int32(j))
+		}
+		workersRanges[i] = rangeList
+		startNumRange = end + 1
+	}
+	return workersRanges
+}
+
+func findMax(array []int32) int32 {
+	max := array[0]
+	for _, value := range array {
+		if value > max {
+			max = value
+		}
+	}
+	return max
 }
 
 // funzione principale del master, divide in chunks e invia ai mapper in modo sincrono
-func (m *Master) Master(request utils.DatasetInput, reply *utils.DatasetOutput) error {
+func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.DatasetOutput) error {
 	log.Printf("Ricevuto dataset: %v", request.Data)
 
-	// dividiamo il dataset in chunks
-	//chunkSize := len(request.Data) / len(m.mappers)
-	//log.Printf("1) chunkSize: %v", chunkSize)
-	//if len(request.Data)%len(m.mappers) != 0 {
-	//	chunkSize++
-	//}
-	//log.Printf("2) chunkSize: %v", chunkSize)
-	chunkSize := 5
-	chunks := divideIntoChunks(request.Data, chunkSize)
-	log.Printf("Dataset diviso in chunks: %v", chunks)
-	//messaggio di ricezione per il client
-	reply.Message = "Dataset diviso in chunks"
+	numWorkers := 5
+	maxData := findMax(request.Data)
+	workerRanges := calculateRanges(int(maxData), numWorkers)
+	fmt.Println("Il range dei worker sono:", workerRanges)
 
-	// invio dei chunks ai mappers in modo sincrono
+	var workerData = make(map[int][]int32)
+
+	for i, value := range request.Data {
+		workerID := (i % numWorkers) + 1
+		workerData[workerID] = append(workerData[workerID], value)
+	}
+	var wg sync.WaitGroup
+	var mutex sync.Mutex
+
+	for workerID, data := range workerData {
+		wg.Add(1)
+		go func(workerID int, data []int32) {
+			defer wg.Done()
+
+			workerAddr := fmt.Sprintf("localhost:%d", 5000+workerID)
+			workerConn, err := rpc.Dial("tcp", workerAddr)
+			if err != nil {
+				log.Printf("Errore nella connessione al worker %d: %v", workerID, err)
+				return
+			}
+			defer workerConn.Close()
+
+			workerArgs := utils.WorkerArgs{
+				JobToDo:      data,
+				WorkerID:     workerID,
+				WorkerRanges: workerRanges,
+			}
+			var workerReply utils.WorkerReply
+			err = workerConn.Call("Worker.ProcessJob", &workerArgs, &workerReply)
+			if err != nil {
+				log.Printf("Errore nella connessione al worker %d: %v", workerID, err)
+				return
+			}
+			mutex.Lock()
+			m.CollectedData = append(m.CollectedData, utils.WorkerData{
+				WorkerID: workerID,
+				Data:     workerReply.Data,
+			})
+			mutex.Unlock()
+
+			fmt.Printf("Ricevuto dataset: %v workerID: %v", workerID, workerReply.Ack)
+		}(workerID, data)
+	}
+
+	wg.Wait()
+
+	reducePhase(workerRanges)
+
+	finalArray := translateDataToArray(m.CollectedData)
+	fmt.Printf("Risultato finale inviato al client %v", finalArray)
+
+	reply.FinalData = finalArray
+	reply.Ack = "Dati elaborati con successo"
+	file, err := os.Create("result.txt")
+	if err != nil {
+		return fmt.Errorf("Errore nel file: %v", err)
+	}
+	defer file.Close()
+
+	var finalSlice []string
+	for _, num := range finalArray {
+		finalSlice = append(finalSlice, fmt.Sprintf("%d", num))
+	}
+	line := strings.Join(finalSlice, " ")
+	_, err = file.WriteString(line)
+	if err != nil {
+		return fmt.Errorf("Errore nella scrittura del file: %v", err)
+	}
+
+	return nil
+}
+
+func reducePhase(workerRanges map[int][]int32) {
 	var wait sync.WaitGroup
-	for i, mapperAddress := range m.mappers {
-		if i >= len(chunks) {
-			break
-		}
+	for wokerID := range workerRanges {
 		wait.Add(1)
-		go func(address string, chunk []string) {
+		go func(workerID int) {
 			defer wait.Done()
-			client, err := rpc.Dial("tcp", address)
-			utils.CheckError(err)
+			workerAddr := fmt.Sprintf("localhost:%d", 5000+workerID)
+			client, err := rpc.Dial("tcp", workerAddr)
+			if err != nil {
+				log.Printf("Errore nella connessione al worker %d: %v", workerID, err)
+				return
+			}
 			defer client.Close()
 
-			chunkRequest := DatasetRequest{Dataset: chunk}
-			var mapperResponse Response
-			err = client.Call("Mapper.RecieveChunk", chunkRequest, &mapperResponse)
+			reduceArgs := utils.WorkerArgs{}
+			reduceReply := utils.WorkerReply{}
+			err = client.Call("Worker.ProcessJob", &reduceArgs, &reduceReply)
 			if err != nil {
-				log.Fatal("Errore inviando il chunk al mapper %s %v", address, err)
+				log.Printf("Errore nella chiamata RPC %d: %v", workerID, err)
 			}
-			log.Printf("Mapper %s ha confermato la ricezione: %v\n", address, mapperResponse.Message)
-		}(mapperAddress, chunks[i])
+			fmt.Printf("Worker %d ha completato la riduzione %v\n", wokerID, reduceReply.Ack)
+		}(wokerID)
 	}
 	wait.Wait()
-	log.Printf("Tutti i mapper hanno ricevuto i chunks")
-	reply.Message = "Dataset diviso e chunk inviati"
-	return nil
-}
-
-func (m *Master) RegisterMapper(req RegisterMapperRequest, res *Response) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	m.mappers = append(m.mappers, req.Address)
-	res.Message = "Mapper con indirizzo registrato"
-	log.Printf("Mapper registro: %v", req.Address)
-	return nil
-}
-
-func divideIntoChunks(input []string, size int) [][]string {
-	var chunks [][]string
-	for size < len(input) {
-		input, chunks = input[size:], append(chunks, input[0:size])
-	}
-	chunks = append(chunks, input)
-	return chunks
 }
 
 func main() {
-	master := &Master{mappers: []string{}}
-	err := rpc.Register(master)
+	master := new(Master)
+	server := rpc.NewServer()
+	err := server.Register(master)
 	utils.CheckError(err)
 
-	listener, err := net.Listen("tcp", "localhost:9999")
+	add := "localhost:9999"
+	listener, err := net.Listen("tcp", add)
 	utils.CheckError(err)
 	defer listener.Close()
 
-	log.Printf("Master in ascolto sulla porta 9999")
+	log.Printf("MasterReceiveData in ascolto sulla porta 9999")
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Printf("Errore nella connessione %v", err)
 			continue
 		}
-		go rpc.ServeConn(conn)
+		go server.ServeConn(conn)
 	}
 }
