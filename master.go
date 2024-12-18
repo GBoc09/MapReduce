@@ -34,7 +34,7 @@ func (m *Master) ReceiveDataFromWorker(arg *utils.WorkerArgs, reply *utils.Worke
 
 }
 
-func translateDataToArray(data []utils.WorkerData) []int32 {
+func DataToArray(data []utils.WorkerData) []int32 {
 	var result []int32
 	for _, worker := range data {
 		for key, value := range worker.Data {
@@ -146,7 +146,7 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 
 	reducerWorkers(ranges)
 
-	finalArray := translateDataToArray(m.CollectedData)
+	finalArray := DataToArray(m.CollectedData)
 	fmt.Printf("Risultato finale inviato al client %v", finalArray)
 
 	reply.FinalData = finalArray
