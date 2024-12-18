@@ -1,7 +1,7 @@
 # Esercizio SDCC sul pattern MapReduce. 
 In questa repository è salvata l'applicazione distribuita che implementa il paradigma MapReducer, in cui tramite chiamate RPC (Remote Procedure Call) implementiamo la comunicazione fra Client, Master e Workers. 
 # Overview 
-L'applicazione genera utilizza un dataset generato dal client per il sorting tramite il pattern MapReduce. Il datasert viene comunicato al Master che procede alla implementazione dei workers per la divisione dei compiti da svolgere. 
+L'applicazione genera utilizza un dataset generato dal client per il sorting tramite il pattern MapReduce. Il dataset viene comunicato al Master che procede all'implementazione dei workers per la divisione dei compiti da svolgere. Le operazioni che vengono compiute da master e workers, sono sincrone ciò significa che si attende sempre il completamento di tutti i processi attivi prima di proseguire. 
 #### Client: 
 Genera un dataset elementi random e lo invia al master. 
 #### Master:
@@ -15,8 +15,8 @@ Il master scrive su un file result.txt i valori ordinati ricevuti da tutti i wor
 
 # Architettura
 - Client: genera un array con taglia fissa, con valori compresi fra 1 e 100.
-- Master: divide in chuks il dataset ricevuto. Il numero dei chunks in cui viene diviso è basato sul numero di workers che andranno a operare la riduzione.
-- Workers: si occupano di entrambe le fasi di Map e Reduce, in cui vanno a dividere e ordianre i valori che gli sono stati inviati dal master. Producono come output un sottoinsieme di valori che rispediscono al master. 
+- Master: divide in chunks il dataset ricevuto. Il numero dei chunks in cui viene diviso è basato sul numero di workers che andranno a operare la riduzione, in questo caso il numero è stato fissato a 5. Come ultimo passo prima di chiudere la sua connessione, si occupa di raggruppare tutti gli array che ha ricevuto dai workers, ordinandoli e salvandoli in un file che viene inviato come risposta al client. 
+- Workers: si occupano di entrambe le fasi di Map e Reduce, in cui vanno a mappare e a ordinare i dati che si sono smistati, rispettando gli intervalli di validità. Ogni worker produce in output un array di valori ordinati che rispediscono al master. 
 
 
 # Installazione ed Esecuzione dell'applicazione
@@ -32,6 +32,6 @@ Per eseguire il codice lanciare da terminale:
 6. go run workers.go --ID=5 --Port=8000
 7. go run client.go
 
-Il file con la versione finale dell'output è possibile trovarlo all'interno del folder MapReduce. 
+Il file result.txt, con la versione finale dell'output è possibile trovarlo all'interno del folder MapReduce. 
 
    
