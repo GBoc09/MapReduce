@@ -2,7 +2,7 @@ package utils
 
 import "log"
 
-type WorkerArgs struct {
+type WorkerValues struct {
 	Value    map[int32]int32
 	ToDo     []int32
 	WorkerID int
@@ -15,11 +15,11 @@ type WorkerReply struct {
 type Reply struct {
 	Ack string
 }
-type ReduceArgs struct {
+type ReducerArgs struct {
 	WorkerID int
 	Ranges   map[int][]int32
 }
-type WorkerData struct {
+type WorkerInfo struct {
 	WorkerID int
 	Data     map[int32]int32
 }

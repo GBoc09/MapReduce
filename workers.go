@@ -36,7 +36,7 @@ func isInRange(key int32, ranges []int32) bool {
 	return key >= ranges[0] && key <= ranges[len(ranges)-1] // ranges[0] = min val; ranges[len(ranges)-1] = max val
 }
 
-func (w *Worker) DistributedAndSortJob(arg *utils.ReduceArgs, reply *utils.Reply) error {
+func (w *Worker) DistributedAndSortJob(arg *utils.ReducerArgs, reply *utils.Reply) error {
 	fmt.Printf("Worker %d: Inizio riduzione dati.\n", w.WorkerID)
 
 	var wg sync.WaitGroup
@@ -81,7 +81,7 @@ func (w *Worker) sendDataToWorker(diffID int, diffRange []int32) error {
 	dataToSend := w.collectDataForRange(diffRange)
 
 	if len(dataToSend) > 0 {
-		sendArgs := utils.WorkerArgs{
+		sendArgs := utils.WorkerValues{
 			Value:    dataToSend,
 			WorkerID: w.WorkerID,
 			Ranges:   w.Ranges,
@@ -119,7 +119,7 @@ func (w *Worker) sendDataToMaster(reply *utils.Reply) error {
 	}
 	defer client.Close()
 
-	args := utils.WorkerArgs{
+	args := utils.WorkerValues{
 		Value:    w.MidSol,
 		WorkerID: w.WorkerID,
 	}
@@ -132,20 +132,20 @@ func (w *Worker) sendDataToMaster(reply *utils.Reply) error {
 	return nil
 }
 
-func (w *Worker) Execute(arg *utils.WorkerArgs, reply *utils.WorkerReply) error {
+func (w *Worker) Execute(arg *utils.WorkerValues, reply *utils.WorkerReply) error {
 	w.WorkerID = arg.WorkerID
 	w.Ranges = arg.Ranges
 	w.ToDo = arg.ToDo
 	fmt.Printf("Value da eseguire: ", arg.ToDo)
 	w.MidSol = createKeyVal(arg.ToDo)
-	workerArgs := utils.WorkerArgs{}
+	workerArgs := utils.WorkerValues{}
 	workerArgs.Value = w.MidSol
 
 	reply.Ack = fmt.Sprintf("Value completato, %d", len(w.MidSol))
 	return nil
 }
 
-func (w *Worker) ReceiveData(arg *utils.WorkerArgs, reply *utils.WorkerReply) error {
+func (w *Worker) ReceiveData(arg *utils.WorkerValues, reply *utils.WorkerReply) error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
