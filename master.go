@@ -151,23 +151,24 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 
 	reply.FinalData = finalArray
 	reply.Ack = "Dati elaborati con successo"
+	if err := writesToFile(finalArray); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writesToFile(finalArray []int32) error {
 	file, err := os.Create("result.txt")
 	if err != nil {
-		return fmt.Errorf("Errore nel file: %v", err)
+		return fmt.Errorf("Errore nella creazione del file: %v", err)
 	}
 	defer file.Close()
-
-	var finalSlice []string
+	var builder strings.Builder
 	for _, num := range finalArray {
-		finalSlice = append(finalSlice, fmt.Sprintf("%d", num))
+		builder.WriteString(fmt.Sprintf("%d ", num))
 	}
-	line := strings.Join(finalSlice, " ")
-	_, err = file.WriteString(line)
-	if err != nil {
-		return fmt.Errorf("Errore nella scrittura del file: %v", err)
-	}
-
-	return nil
+	_, err = file.WriteString(strings.TrimSpace(builder.String()))
+	return err
 }
 
 func reducerWorkers(workerRanges map[int][]int32) {
