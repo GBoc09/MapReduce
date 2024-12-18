@@ -56,7 +56,7 @@ func maxAndRanges(dataset []int32, workersNum int) map[int][]int32 {
 			max = value
 		}
 	}
-	fmt.Println("Max value in the dataset: %d", max)
+	fmt.Println("Max  value in the dataset: %d", max)
 
 	ranges := make(map[int][]int32)
 	item := int(max)
