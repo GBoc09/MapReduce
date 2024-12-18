@@ -49,40 +49,6 @@ func translateDataToArray(data []utils.WorkerData) []int32 {
 	return result
 }
 
-//func rangeWorker(totItem, totWorkers int) map[int][]int32 {
-//	workersRanges := make(map[int][]int32)
-//	rangeSize := totItem / totWorkers
-//	remaining := totItem % totWorkers
-//
-//	startNumRange := 1
-//	for i := 1; i <= totWorkers; i++ {
-//		end := startNumRange + rangeSize - 1
-//		if i <= remaining {
-//			end++
-//		}
-//		if i == totWorkers {
-//			end = totItem
-//		}
-//		rangeList := make([]int32, end-startNumRange+1)
-//		for j := startNumRange; j <= end; j++ {
-//			rangeList = append(rangeList, int32(j))
-//		}
-//		workersRanges[i] = rangeList
-//		startNumRange = end + 1
-//	}
-//	return workersRanges
-//}
-
-//func maxValue(array []int32) int32 {
-//	max := array[0]
-//	for _, value := range array {
-//		if value > max {
-//			max = value
-//		}
-//	}
-//	return max
-//}
-
 func maxAndRanges(dataset []int32, workersNum int) map[int][]int32 {
 	max := dataset[0]
 	for _, value := range dataset {
@@ -128,8 +94,6 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 	ranges := maxAndRanges(request.Data, numWorkers)
 	fmt.Println("Range dei workers: %v", ranges)
 
-	//maxData := maxValue(request.Data)
-	//workerRanges := rangeWorker(int(maxData), numWorkers)
 	fmt.Println("I range dei worker sono:", ranges)
 
 	var workerData = make(map[int][]int32)
@@ -140,10 +104,6 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 		workerData[workerID] = append(workerData[workerID], value...)
 	}
 
-	//for i, value := range request.Data {
-	//	workerID := (i % numWorkers) + 1
-	//	workerData[workerID] = append(workerData[workerID], value)
-	//}
 	var wg sync.WaitGroup
 	var mutex sync.Mutex
 

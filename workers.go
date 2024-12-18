@@ -11,13 +11,14 @@ import (
 	"sync"
 )
 
+const masterPort = 9999 // porta del master
+
 type Worker struct {
 	WorkerID     int
 	WorkerToDo   []int32
 	WorkerRanges map[int][]int32
 	Intermediate map[int32]int32
 	mutex        sync.Mutex
-	wait         sync.WaitGroup
 }
 
 func createKeyVal(data []int32) map[int32]int32 {
@@ -28,71 +29,106 @@ func createKeyVal(data []int32) map[int32]int32 {
 	fmt.Println("Il result è", result)
 	return result
 }
+func isInRange(key int32, ranges []int32) bool {
+	if len(ranges) == 0 {
+		return false // non ci sono intervalli da controllare
+	}
+	return key >= ranges[0] && key <= ranges[len(ranges)-1] // ranges[0] = min val; ranges[len(ranges)-1] = max val
+}
 
 func (w *Worker) DistributedAndSortJob(arg *utils.ReduceArgs, reply *utils.ReduceReply) error {
-	fmt.Printf("Worker %d: inizio riduzione dati.\n", w.WorkerID)
+	fmt.Printf("Worker %d: Inizio riduzione dati.\n", w.WorkerID)
+
 	var wg sync.WaitGroup
 
+	// Distribuzione dei dati ad altri worker
 	for diffID, diffRange := range w.WorkerRanges {
 		if diffID == w.WorkerID {
 			continue
 		}
+
 		wg.Add(1)
 		go func(diffID int, diffRange []int32) {
 			defer wg.Done()
-
-			diffAddress := fmt.Sprintf("localhost:%d", 8000+diffID)
-			client, err := rpc.Dial("tcp", diffAddress)
-			if err != nil {
-				log.Fatal("errore nella connessione %v:\n", err)
-				return
-			}
-			defer client.Close()
-
-			// Mappa temporanea per accumulare dati da inviare ad altri workers
-			dataToSend := make(map[int32]int32)
-			w.mutex.Lock()
-			for key, val := range w.Intermediate {
-				if !isInRange(key, w.WorkerRanges[w.WorkerID]) && isInRange(key, diffRange) {
-					dataToSend[key] += val
-					delete(w.Intermediate, key)
-				}
-			}
-			w.mutex.Unlock()
-			if len(dataToSend) > 0 {
-				sendA := utils.WorkerArgs{
-					Job:          dataToSend,
-					WorkerID:     w.WorkerID,
-					WorkerRanges: w.WorkerRanges,
-				}
-				var sendReply *utils.WorkerReply
-				err = client.Call("Worker.ReceiveData", &sendA, &sendReply)
-				if err != nil {
-					log.Printf("errore nella chiamata RPC %v:\n", err)
-					return
-				}
+			if err := w.sendDataToWorker(diffID, diffRange); err != nil {
+				log.Printf("Errore durante l'invio dei dati al Worker %d: %v", diffID, err)
 			}
 		}(diffID, diffRange)
-		wg.Wait()
-		// Invio finale al master
-		masterAddr := "localhost:9999"
-		client, err := rpc.Dial("tcp", masterAddr)
-		if err != nil {
-			log.Printf("Errore connessione con il master: %v", err)
-			return err
-		}
-		defer client.Close()
+	}
 
-		args := utils.WorkerArgs{
-			Job:      w.Intermediate,
-			WorkerID: w.WorkerID,
+	// Attesa che tutti i goroutine completino
+	wg.Wait()
+
+	// Invio dei dati finali al master
+	if err := w.sendDataToMaster(reply); err != nil {
+		return err
+	}
+
+	reply.Ack = "Riduzione completata e dati inviati al master"
+	return nil
+}
+
+// Invio dati ad altri worker
+func (w *Worker) sendDataToWorker(diffID int, diffRange []int32) error {
+	diffAddress := fmt.Sprintf("localhost:%d", 8000+diffID)
+	client, err := rpc.Dial("tcp", diffAddress)
+	if err != nil {
+		return fmt.Errorf("connessione fallita a %s: %v", diffAddress, err)
+	}
+	defer client.Close()
+
+	// Raccolta dati da inviare
+	dataToSend := w.collectDataForRange(diffRange)
+
+	if len(dataToSend) > 0 {
+		sendArgs := utils.WorkerArgs{
+			Job:          dataToSend,
+			WorkerID:     w.WorkerID,
+			WorkerRanges: w.WorkerRanges,
 		}
-		if err := client.Call("Master.ReceiveDataFromWorker", &args, reply); err != nil {
-			log.Printf("Errore chiamata RPC al master: %v", err)
-			return err
+		var sendReply utils.WorkerReply
+		if err := client.Call("Worker.ReceiveData", &sendArgs, &sendReply); err != nil {
+			return fmt.Errorf("chiamata RPC fallita: %v", err)
 		}
 	}
-	reply.Ack = "Riduzione completata e dati inviati al master"
+	return nil
+}
+
+// Raccolta dati da inviare per un intervallo specifico
+func (w *Worker) collectDataForRange(targetRange []int32) map[int32]int32 {
+	dataToSend := make(map[int32]int32)
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+
+	for key, val := range w.Intermediate {
+		if !isInRange(key, w.WorkerRanges[w.WorkerID]) && isInRange(key, targetRange) {
+			dataToSend[key] = val
+			delete(w.Intermediate, key)
+		}
+	}
+	return dataToSend
+}
+
+// Funzione per inviare i dati finali al master
+func (w *Worker) sendDataToMaster(reply *utils.ReduceReply) error {
+	masterAddr := fmt.Sprintf("localhost:%d", masterPort)
+	client, err := rpc.Dial("tcp", masterAddr)
+	if err != nil {
+		log.Printf("Errore connessione con il master: %v", err)
+		return err
+	}
+	defer client.Close()
+
+	args := utils.WorkerArgs{
+		Job:      w.Intermediate,
+		WorkerID: w.WorkerID,
+	}
+
+	if err := client.Call("Master.ReceiveDataFromWorker", &args, reply); err != nil {
+		log.Printf("Errore chiamata RPC al master: %v", err)
+		return err
+	}
+
 	return nil
 }
 
@@ -120,12 +156,6 @@ func (w *Worker) ReceiveData(arg *utils.WorkerArgs, reply *utils.WorkerReply) er
 	}
 	reply.Ack = "Dati ricevuti"
 	return nil
-}
-func isInRange(key int32, ranges []int32) bool {
-	if len(ranges) == 0 {
-		return false // non ci sono intervalli da controllare
-	}
-	return key >= ranges[0] && key <= ranges[len(ranges)-1] // ranges[0] = min val; ranges[len(ranges)-1] = max val
 }
 
 func main() {
