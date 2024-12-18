@@ -49,38 +49,74 @@ func translateDataToArray(data []utils.WorkerData) []int32 {
 	return result
 }
 
-func rangeWorker(totItem, totWorkers int) map[int][]int32 {
-	workersRanges := make(map[int][]int32)
-	rangeSize := totItem / totWorkers
-	remaining := totItem % totWorkers
+//func rangeWorker(totItem, totWorkers int) map[int][]int32 {
+//	workersRanges := make(map[int][]int32)
+//	rangeSize := totItem / totWorkers
+//	remaining := totItem % totWorkers
+//
+//	startNumRange := 1
+//	for i := 1; i <= totWorkers; i++ {
+//		end := startNumRange + rangeSize - 1
+//		if i <= remaining {
+//			end++
+//		}
+//		if i == totWorkers {
+//			end = totItem
+//		}
+//		rangeList := make([]int32, end-startNumRange+1)
+//		for j := startNumRange; j <= end; j++ {
+//			rangeList = append(rangeList, int32(j))
+//		}
+//		workersRanges[i] = rangeList
+//		startNumRange = end + 1
+//	}
+//	return workersRanges
+//}
 
-	startNumRange := 1
-	for i := 1; i <= totWorkers; i++ {
-		end := startNumRange + rangeSize - 1
-		if i <= remaining {
-			end++
-		}
-		if i == totWorkers {
-			end = totItem
-		}
-		rangeList := make([]int32, end-startNumRange+1)
-		for j := startNumRange; j <= end; j++ {
-			rangeList = append(rangeList, int32(j))
-		}
-		workersRanges[i] = rangeList
-		startNumRange = end + 1
-	}
-	return workersRanges
-}
+//func maxValue(array []int32) int32 {
+//	max := array[0]
+//	for _, value := range array {
+//		if value > max {
+//			max = value
+//		}
+//	}
+//	return max
+//}
 
-func maxValue(array []int32) int32 {
-	max := array[0]
-	for _, value := range array {
+func maxAndRanges(dataset []int32, workersNum int) map[int][]int32 {
+	max := dataset[0]
+	for _, value := range dataset {
 		if value > max {
 			max = value
 		}
 	}
-	return max
+	fmt.Println("Max value in the dataset: %d", max)
+
+	ranges := make(map[int][]int32)
+	item := int(max)
+	size := item / workersNum
+	start := 1
+	for i := 1; i <= workersNum; i++ {
+		end := start + size - 1
+		if i == workersNum {
+			end = item
+		}
+		list := make([]int32, end-start+1)
+		for j := start; j <= end; j++ {
+			list = append(list, int32(j))
+		}
+		ranges[i] = list
+		start = end + 1
+	}
+	return ranges
+}
+func divideIntoChunks(input []int32, size int) [][]int32 {
+	var chunks [][]int32
+	for size < len(input) {
+		input, chunks = input[size:], append(chunks, input[0:size])
+	}
+	chunks = append(chunks, input)
+	return chunks
 }
 
 // funzione principale del master, divide in chunks e invia ai mapper in modo sincrono
@@ -88,16 +124,26 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 	log.Printf("Ricevuto dataset: %v", request.Data)
 
 	numWorkers := 5
-	maxData := maxValue(request.Data)
-	workerRanges := rangeWorker(int(maxData), numWorkers)
-	fmt.Println("Il range dei worker sono:", workerRanges)
+
+	ranges := maxAndRanges(request.Data, numWorkers)
+	fmt.Println("Range dei workers: %v", ranges)
+
+	//maxData := maxValue(request.Data)
+	//workerRanges := rangeWorker(int(maxData), numWorkers)
+	fmt.Println("I range dei worker sono:", ranges)
 
 	var workerData = make(map[int][]int32)
 
-	for i, value := range request.Data {
+	chunks := divideIntoChunks(request.Data, numWorkers)
+	for i, value := range chunks {
 		workerID := (i % numWorkers) + 1
-		workerData[workerID] = append(workerData[workerID], value)
+		workerData[workerID] = append(workerData[workerID], value...)
 	}
+
+	//for i, value := range request.Data {
+	//	workerID := (i % numWorkers) + 1
+	//	workerData[workerID] = append(workerData[workerID], value)
+	//}
 	var wg sync.WaitGroup
 	var mutex sync.Mutex
 
@@ -117,7 +163,7 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 			workerArgs := utils.WorkerArgs{
 				ToDo:         data,
 				WorkerID:     workerID,
-				WorkerRanges: workerRanges,
+				WorkerRanges: ranges,
 			}
 			var workerReply utils.WorkerReply
 			err = workerConn.Call("Worker.Execute", &workerArgs, &workerReply)
@@ -138,7 +184,7 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 
 	wg.Wait()
 
-	reducerWorkers(workerRanges)
+	reducerWorkers(ranges)
 
 	finalArray := translateDataToArray(m.CollectedData)
 	fmt.Printf("Risultato finale inviato al client %v", finalArray)

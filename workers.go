@@ -31,67 +31,66 @@ func createKeyVal(data []int32) map[int32]int32 {
 
 func (w *Worker) DistributedAndSortJob(arg *utils.ReduceArgs, reply *utils.ReduceReply) error {
 	fmt.Printf("Worker %d: inizio riduzione dati.\n", w.WorkerID)
-
-	// Mappa temporanea per accumulare dati da inviare ad altri workers
-	dataToSend := make(map[int]map[int32]int32)
-
-	w.mutex.Lock()
-	for key, val := range w.Intermediate {
-		for diffID, diffRange := range w.WorkerRanges {
-			if diffID != w.WorkerID && isInRange(key, diffRange) {
-				if _, exists := dataToSend[diffID]; !exists {
-					dataToSend[diffID] = make(map[int32]int32)
-				}
-				dataToSend[diffID][key] = val
-				delete(w.Intermediate, key)
-				break
-			}
-		}
-	}
-	w.mutex.Unlock()
-
-	// Invio dei dati accumulati ai workers destinatari
 	var wg sync.WaitGroup
-	for diffID, data := range dataToSend {
+
+	for diffID, diffRange := range w.WorkerRanges {
+		if diffID == w.WorkerID {
+			continue
+		}
 		wg.Add(1)
-		go func(diffID int, data map[int32]int32) {
+		go func(diffID int, diffRange []int32) {
 			defer wg.Done()
-			diffWorkerAddr := fmt.Sprintf("localhost:%d", 8000+diffID)
-			client, err := rpc.Dial("tcp", diffWorkerAddr)
+
+			diffAddress := fmt.Sprintf("localhost:%d", 8000+diffID)
+			client, err := rpc.Dial("tcp", diffAddress)
 			if err != nil {
-				log.Printf("Errore connessione worker %d: %v", diffID, err)
+				log.Fatal("errore nella connessione %v:\n", err)
 				return
 			}
 			defer client.Close()
 
-			args := utils.WorkerArgs{
-				Job:      data,
-				WorkerID: w.WorkerID,
+			// Mappa temporanea per accumulare dati da inviare ad altri workers
+			dataToSend := make(map[int32]int32)
+			w.mutex.Lock()
+			for key, val := range w.Intermediate {
+				if !isInRange(key, w.WorkerRanges[w.WorkerID]) && isInRange(key, diffRange) {
+					dataToSend[key] += val
+					delete(w.Intermediate, key)
+				}
 			}
-			var response utils.ReduceReply
-			if err := client.Call("Worker.ReceiveData", &args, &response); err != nil {
-				log.Printf("Errore chiamata RPC al worker %d: %v", diffID, err)
+			w.mutex.Unlock()
+			if len(dataToSend) > 0 {
+				sendA := utils.WorkerArgs{
+					Job:          dataToSend,
+					WorkerID:     w.WorkerID,
+					WorkerRanges: w.WorkerRanges,
+				}
+				var sendReply *utils.WorkerReply
+				err = client.Call("Worker.ReceiveData", &sendA, &sendReply)
+				if err != nil {
+					log.Printf("errore nella chiamata RPC %v:\n", err)
+					return
+				}
 			}
-		}(diffID, data)
-	}
-	wg.Wait()
+		}(diffID, diffRange)
+		wg.Wait()
+		// Invio finale al master
+		masterAddr := "localhost:9999"
+		client, err := rpc.Dial("tcp", masterAddr)
+		if err != nil {
+			log.Printf("Errore connessione con il master: %v", err)
+			return err
+		}
+		defer client.Close()
 
-	// Invio finale al master
-	masterAddr := "localhost:9999"
-	client, err := rpc.Dial("tcp", masterAddr)
-	if err != nil {
-		log.Printf("Errore connessione con il master: %v", err)
-		return err
-	}
-	defer client.Close()
-
-	args := utils.WorkerArgs{
-		Job:      w.Intermediate,
-		WorkerID: w.WorkerID,
-	}
-	if err := client.Call("Master.ReceiveDataFromWorker", &args, reply); err != nil {
-		log.Printf("Errore chiamata RPC al master: %v", err)
-		return err
+		args := utils.WorkerArgs{
+			Job:      w.Intermediate,
+			WorkerID: w.WorkerID,
+		}
+		if err := client.Call("Master.ReceiveDataFromWorker", &args, reply); err != nil {
+			log.Printf("Errore chiamata RPC al master: %v", err)
+			return err
+		}
 	}
 	reply.Ack = "Riduzione completata e dati inviati al master"
 	return nil
