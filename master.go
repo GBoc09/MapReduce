@@ -25,7 +25,7 @@ func (m *Master) ReceiveDataFromWorker(arg *utils.WorkerArgs, reply *utils.Worke
 
 	workerData := utils.WorkerData{
 		WorkerID: arg.WorkerID,
-		Data:     arg.Job,
+		Data:     arg.Value,
 	}
 	m.CollectedData = append(m.CollectedData, workerData)
 	reply.Ack = "Dati ricevuti dai workers"
@@ -121,9 +121,9 @@ func (m *Master) MasterReceiveData(request utils.DatasetInput, reply *utils.Data
 			defer workerConn.Close()
 
 			workerArgs := utils.WorkerArgs{
-				ToDo:         data,
-				WorkerID:     workerID,
-				WorkerRanges: ranges,
+				ToDo:     data,
+				WorkerID: workerID,
+				Ranges:   ranges,
 			}
 			var workerReply utils.WorkerReply
 			err = workerConn.Call("Worker.Execute", &workerArgs, &workerReply)

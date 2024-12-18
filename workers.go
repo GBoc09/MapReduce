@@ -14,11 +14,11 @@ import (
 const masterPort = 9999 // porta del master
 
 type Worker struct {
-	WorkerID     int
-	WorkerToDo   []int32
-	WorkerRanges map[int][]int32
-	Intermediate map[int32]int32
-	mutex        sync.Mutex
+	WorkerID int
+	ToDo     []int32
+	Ranges   map[int][]int32
+	MidSol   map[int32]int32
+	mutex    sync.Mutex
 }
 
 func createKeyVal(data []int32) map[int32]int32 {
@@ -36,13 +36,13 @@ func isInRange(key int32, ranges []int32) bool {
 	return key >= ranges[0] && key <= ranges[len(ranges)-1] // ranges[0] = min val; ranges[len(ranges)-1] = max val
 }
 
-func (w *Worker) DistributedAndSortJob(arg *utils.ReduceArgs, reply *utils.ReduceReply) error {
+func (w *Worker) DistributedAndSortJob(arg *utils.ReduceArgs, reply *utils.Reply) error {
 	fmt.Printf("Worker %d: Inizio riduzione dati.\n", w.WorkerID)
 
 	var wg sync.WaitGroup
 
 	// Distribuzione dei dati ad altri worker
-	for diffID, diffRange := range w.WorkerRanges {
+	for diffID, diffRange := range w.Ranges {
 		if diffID == w.WorkerID {
 			continue
 		}
@@ -82,9 +82,9 @@ func (w *Worker) sendDataToWorker(diffID int, diffRange []int32) error {
 
 	if len(dataToSend) > 0 {
 		sendArgs := utils.WorkerArgs{
-			Job:          dataToSend,
-			WorkerID:     w.WorkerID,
-			WorkerRanges: w.WorkerRanges,
+			Value:    dataToSend,
+			WorkerID: w.WorkerID,
+			Ranges:   w.Ranges,
 		}
 		var sendReply utils.WorkerReply
 		if err := client.Call("Worker.ReceiveData", &sendArgs, &sendReply); err != nil {
@@ -100,17 +100,17 @@ func (w *Worker) collectDataForRange(targetRange []int32) map[int32]int32 {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
-	for key, val := range w.Intermediate {
-		if !isInRange(key, w.WorkerRanges[w.WorkerID]) && isInRange(key, targetRange) {
+	for key, val := range w.MidSol {
+		if !isInRange(key, w.Ranges[w.WorkerID]) && isInRange(key, targetRange) {
 			dataToSend[key] = val
-			delete(w.Intermediate, key)
+			delete(w.MidSol, key)
 		}
 	}
 	return dataToSend
 }
 
 // Funzione per inviare i dati finali al master
-func (w *Worker) sendDataToMaster(reply *utils.ReduceReply) error {
+func (w *Worker) sendDataToMaster(reply *utils.Reply) error {
 	masterAddr := fmt.Sprintf("localhost:%d", masterPort)
 	client, err := rpc.Dial("tcp", masterAddr)
 	if err != nil {
@@ -120,7 +120,7 @@ func (w *Worker) sendDataToMaster(reply *utils.ReduceReply) error {
 	defer client.Close()
 
 	args := utils.WorkerArgs{
-		Job:      w.Intermediate,
+		Value:    w.MidSol,
 		WorkerID: w.WorkerID,
 	}
 
@@ -134,14 +134,14 @@ func (w *Worker) sendDataToMaster(reply *utils.ReduceReply) error {
 
 func (w *Worker) Execute(arg *utils.WorkerArgs, reply *utils.WorkerReply) error {
 	w.WorkerID = arg.WorkerID
-	w.WorkerRanges = arg.WorkerRanges
-	w.WorkerToDo = arg.ToDo
-	fmt.Printf("Job da eseguire: ", arg.ToDo)
-	w.Intermediate = createKeyVal(arg.ToDo)
+	w.Ranges = arg.Ranges
+	w.ToDo = arg.ToDo
+	fmt.Printf("Value da eseguire: ", arg.ToDo)
+	w.MidSol = createKeyVal(arg.ToDo)
 	workerArgs := utils.WorkerArgs{}
-	workerArgs.Job = w.Intermediate
+	workerArgs.Value = w.MidSol
 
-	reply.Ack = fmt.Sprintf("Job completato, %d", len(w.Intermediate))
+	reply.Ack = fmt.Sprintf("Value completato, %d", len(w.MidSol))
 	return nil
 }
 
@@ -149,9 +149,9 @@ func (w *Worker) ReceiveData(arg *utils.WorkerArgs, reply *utils.WorkerReply) er
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
-	for key, value := range arg.Job {
-		if isInRange(key, w.WorkerRanges[w.WorkerID]) {
-			w.Intermediate[key] += value
+	for key, value := range arg.Value {
+		if isInRange(key, w.Ranges[w.WorkerID]) {
+			w.MidSol[key] += value
 		}
 	}
 	reply.Ack = "Dati ricevuti"

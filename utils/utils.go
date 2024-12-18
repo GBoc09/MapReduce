@@ -3,21 +3,21 @@ package utils
 import "log"
 
 type WorkerArgs struct {
-	Job          map[int32]int32
-	ToDo         []int32
-	WorkerID     int
-	WorkerRanges map[int][]int32
+	Value    map[int32]int32
+	ToDo     []int32
+	WorkerID int
+	Ranges   map[int][]int32
 }
 type WorkerReply struct {
 	Ack  string
 	Data map[int32]int32
 }
-type ReduceReply struct {
+type Reply struct {
 	Ack string
 }
 type ReduceArgs struct {
-	WorkerID     int
-	WorkerRanges map[int][]int32
+	WorkerID int
+	Ranges   map[int][]int32
 }
 type WorkerData struct {
 	WorkerID int
